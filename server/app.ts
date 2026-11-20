@@ -46,7 +46,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 const mime: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript',
   '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png',
-  '.woff2': 'font/woff2', '.ico': 'image/x-icon',
+  '.webp': 'image/webp', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ico': 'image/x-icon',
 };
 
 function acceptsGzip(header: string | undefined) {

@@ -11,12 +11,13 @@ test('static assets negotiate prebuilt gzip without changing content or API stre
   const dir = mkdtempSync(join(tmpdir(), 'studio91-static-'));
   const content = 'console.log("Studio 91 classroom");\n'.repeat(2000);
   const compressed = gzipSync(content);
-  const fixtures = ['index.html', 'index.html.gz', 'site.js', 'site.js.gz', 'plain.svg'];
+  const fixtures = ['index.html', 'index.html.gz', 'site.js', 'site.js.gz', 'plain.svg', 'art.webp'];
   writeFileSync(join(dir, 'index.html'), '<html>Classroom</html>');
   writeFileSync(join(dir, 'index.html.gz'), gzipSync('<html>Classroom</html>'));
   writeFileSync(join(dir, 'site.js'), content);
   writeFileSync(join(dir, 'site.js.gz'), compressed);
   writeFileSync(join(dir, 'plain.svg'), '<svg/>');
+  writeFileSync(join(dir, 'art.webp'), Buffer.from('RIFFtestWEBP'));
   const server = createApp(new RoomStore(join(dir, 'unused.json')), dir);
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const address = server.address();
@@ -42,6 +43,10 @@ test('static assets negotiate prebuilt gzip without changing content or API stre
     const plain = await fetch(base + '/plain.svg', { headers: { 'Accept-Encoding': 'gzip' } });
     assert.equal(plain.headers.get('content-encoding'), null);
     assert.equal(await plain.text(), '<svg/>');
+    const artwork = await fetch(base + '/art.webp');
+    assert.equal(artwork.headers.get('content-type'), 'image/webp');
+    assert.equal(artwork.headers.get('content-encoding'), null);
+    assert.equal((await artwork.arrayBuffer()).byteLength, 12);
     const api = await fetch(base + '/api/health');
     assert.equal(api.headers.get('content-encoding'), null);
     assert.deepEqual(await api.json(), { ok: true });

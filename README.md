@@ -1,6 +1,17 @@
-# Studio 91 / Back to school
+# Seat picker / Studio +91
 
-A shared classroom icebreaker with 20 two-person benches, 40 selectable spots, cats, pencil mountains, backbench doodles, and live cursors. The scrapbook/chalkboard design uses locally served Patrick Hand and Schoolbell, cream notebook paper, taped notes, original SVG doodles, and pink, cyan, mint, and peach accents.
+A shared classroom icebreaker with 20 two-person benches, 40 selectable spots, cats, pencil mountains, backbench doodles, and live cursors.
+
+## Visual style and supplied artwork
+
+- The `studio +91` badge is preserved from the supplied logo image; the adjacent wordmark reads `seat picker.`.
+- The supplied green chalkboard artwork is used intact in the welcome area and the 3D room, preserving its embedded chalk lettering and illustrations. Chalk drawings elsewhere are cropped from the supplied transparent illustration sheet.
+- Notebook panels use the blank paper texture from the supplied notebook reference, blue rules, pink margins, taped corners, and distinct sketch-pen SVG doodles. No person's name or photograph from that reference is included in the web assets.
+- Patrick Hand is locally served and used throughout non-chalkboard text, including controls and dialogs.
+- Dynamic chalkboard text prefers the exact `Chalk board` or `Chalkboard` face if it is installed on the viewer's device. A licensed webfont file has not been provided, so the existing locally served Schoolbell face is an explicit fallback for those labels. The supplied board's lettering is already embedded in its artwork and is not replaced by the fallback.
+- The fourth referenced image has not been provided as an accessible attachment. The currently implemented notebook treatment follows the third supplied reference.
+
+Reference attachments remain unchanged; derived web assets are in `public/branding` and `public/visuals`. Gameplay, room IDs, cats, pencil counts, and live cursors are unaffected by the style change.
 
 ## Deploy on Vercel: one project, one link
 

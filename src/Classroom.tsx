@@ -1,4 +1,4 @@
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { Component, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -82,42 +82,14 @@ function PaintedPanel({ position, size, draw, rotation = [0, 0, 0] }: {
   </mesh>;
 }
 
-const chalkboard = (ctx: CanvasRenderingContext2D) => {
-  ctx.fillStyle = '#2c3938';
-  ctx.fillRect(0, 0, 1024, 512);
-  for (let index = 0; index < 1500; index++) {
-    ctx.fillStyle = `rgba(242,242,219,${0.01 + (index % 5) * 0.006})`;
-    ctx.fillRect((index * 157) % 1024, (index * 73) % 512, 16 + index % 20, 1);
-  }
-  ctx.strokeStyle = '#ffffff33';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(22, 22, 980, 468);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffd696';
-  ctx.font = '26px Schoolbell, cursive';
-  ctx.fillText('Thought: Every day is a new day.', 512, 66);
-  ctx.fillStyle = '#f794df';
-  ctx.font = '66px Schoolbell, cursive';
-  ctx.fillText('Studio all hearts.', 512, 190);
-  ctx.fillStyle = '#fffbee';
-  ctx.font = '72px Schoolbell, cursive';
-  ctx.fillText('Masti ki paathshala', 512, 285);
-  ctx.font = '30px "Patrick Hand", cursive';
-  ctx.fillStyle = '#90d8c2';
-  ctx.fillText('Welcome back, class of you.', 512, 406);
-  ctx.strokeStyle = '#ffd696';
-  ctx.beginPath();
-  ctx.moveTo(250, 325); ctx.quadraticCurveTo(512, 293, 780, 325); ctx.stroke();
-  for (const [x, y] of [[100, 170], [915, 330], [880, 135]]) {
-    ctx.beginPath();
-    ctx.moveTo(x! - 13, y!); ctx.lineTo(x! + 13, y!);
-    ctx.moveTo(x!, y! - 13); ctx.lineTo(x!, y! + 13); ctx.stroke();
-  }
-  ['#ffd696', '#f794df', '#48b9d4', '#7bd2b7'].forEach((color, i) => {
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(100 + i * 275, i % 2 ? 450 : 60, 13, 0, Math.PI * 2); ctx.fill();
-  });
-};
+function BoardArtwork() {
+  const texture = useLoader(THREE.TextureLoader, `${import.meta.env.BASE_URL}visuals/board.webp`);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return <mesh position={[0.4, 3.15, -5.965]}>
+    <planeGeometry args={[7.35, 7.35 * 768 / 1365]} />
+    <meshBasicMaterial map={texture} />
+  </mesh>;
+}
 
 const poster = (ctx: CanvasRenderingContext2D) => {
   ctx.fillStyle = '#fff0be'; ctx.fillRect(0, 0, 1024, 512);
@@ -373,10 +345,8 @@ function Scene(props: Props) {
       <Window z={-2.5} /><Window z={2.2} />
       <Plant position={[-7.5, 2, -2]} scale={0.65} />
       <Plant position={[-7.5, 2, 2.8]} scale={0.65} />
-      <Box position={[0.4, 3.4, -6.06]} size={[7.6, 2.85, 0.15]} color="#cf9964" />
-      <PaintedPanel position={[0.4, 3.4, -5.965]} size={[7.32, 2.59]} draw={chalkboard} />
-      <Box position={[0.4, 1.94, -5.86]} size={[7.8, 0.12, 0.38]} color="#cf9964" />
-      <Box position={[2, 2.04, -5.8]} size={[0.35, 0.06, 0.16]} color="#e4d7b4" />
+      <Box position={[0.4, 3.15, -6.06]} size={[7.5, 4.2, 0.15]} color="#cf9964" />
+      <BoardArtwork />
       <Box position={[-5.1, 3.55, -6.04]} size={[2.4, 1.7, 0.12]} color="#9b60ac" />
       <PaintedPanel position={[-5.1, 3.55, -5.96]} size={[2.25, 1.52]} draw={poster} />
       <PaintedPanel position={[5.9, 3.9, -6.02]} size={[2.3, 1.15]} draw={clockFace} />

@@ -92,7 +92,7 @@ export function graffitiDrawing(seed: number) {
     ctx.beginPath(); ctx.moveTo(51, 10); ctx.lineTo(76, 35); ctx.moveTo(76, 10); ctx.lineTo(51, 35); ctx.stroke();
     ctx.restore();
     ctx.fillStyle = '#533960bc';
-    ctx.font = '700 43px "Outfit Variable", Arial, sans-serif';
+    ctx.font = '43px "Patrick Hand", cursive';
     ctx.save(); ctx.translate(610, 120 + seed % 3 * 20); ctx.rotate(0.1);
     ctx.fillText(seed % 2 ? '91 WAS HERE' : 'zzz... last period', 0, 0); ctx.restore();
     ctx.strokeStyle = '#465780b0'; ctx.lineWidth = 4;

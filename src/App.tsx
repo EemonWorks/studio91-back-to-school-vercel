@@ -60,7 +60,11 @@ function SeatMap({ counts, selected, heatmap, onSelect }: {
 }) {
   const max = Math.max(1, ...counts);
   return <div className="seat-map">
-    <div className="map-board"><span>Welcome back, class of you.</span><small>CHALKBOARD / FRONT OF CLASS</small></div>
+    <div className="map-board">
+      <Doodle kind="hearts" medium="chalk" className="map-board-hearts" />
+      <span>Welcome back, class of you.</span><small>CHALKBOARD / FRONT OF CLASS</small>
+      <img className="map-board-star" src={`${import.meta.env.BASE_URL}visuals/chalk-star.webp`} alt="" aria-hidden="true" />
+    </div>
     {Array.from({ length: ROWS }, (_, row) => <div className="map-row" key={row}>
       <span className="row-label">{String.fromCharCode(65 + row)}</span>
       {Array.from({ length: BENCHES_PER_ROW }, (_, bench) => {
@@ -283,9 +287,10 @@ export default function App() {
 
   return <div className="app-shell" ref={pageRef}>
     <header className="site-header">
-      <a className="brand" href={location.pathname} aria-label="Studio 91 Back to school home">
-        <span className="brand-symbol">s<span>91</span><i /></span>
-        <span className="brand-wordmark">studio<span>91</span><small>A MICROSOFT DESIGN STUDIO</small></span>
+      <a className="brand" href={location.pathname} aria-label="Seat picker by Studio +91 home">
+        <img className="brand-studio" src={`${import.meta.env.BASE_URL}branding/studio-plus91.webp`}
+          alt="studio +91" width={216} height={101} />
+        <span className="brand-wordmark">seat picker<span className="brand-period">.</span></span>
       </a>
       <div className="header-middle"><span className="tiny-star">✳</span> A LITTLE NOSTALGIA. A LOT OF US.</div>
       <nav aria-label="Classroom actions">
@@ -296,15 +301,19 @@ export default function App() {
     </header>
 
     <main>
-      <section className="intro">
-        <div className="intro-copy">
-          <div className="eyebrow"><span className="eyebrow-line" /> STUDIO 91 / MASTI KI PAATHSHALA <span className="edition">VOL. 01</span></div>
-          <h1>Back to school.<br /> <em>Back to your seat.</em><span className="heading-spark" aria-hidden="true">✳</span></h1>
-          <p>New faces. Old habits. Where did you sit when the bell rang?</p>
-          <span className="chalk-thought">Thought of the day: a little nostalgia brings us together.</span>
+      <section className="intro" aria-labelledby="home-title">
+        <img className="board-artwork" src={`${import.meta.env.BASE_URL}visuals/board.webp`}
+          width={1365} height={768} alt="" fetchPriority="high" />
+        <h1 className="sr-only" id="home-title">Back to school. Back to your seat.</h1>
+        <p className="sr-only">Studio +91 All Hearts. Masti ki paathshala. Thought: Every change is an opportunity to meet a new you.</p>
+      </section>
+      <section className="welcome-notes" aria-label="Classroom welcome">
+        <div className="welcome-copy">
+          <div className="eyebrow"><span className="eyebrow-line" /> STUDIO +91 HOMECOMING <span className="edition">VOL. 01</span></div>
+          <h2>Where did you sit when the bell rang?</h2>
+          <p>New faces. Old habits. Find your old spot, and meet your classmates.</p>
         </div>
         <div className="intro-note"><Doodle kind="flower" /><span>No right answers.<br />Just your old spot.</span><Doodle kind="plane" /></div>
-        <Doodle kind="hearts" className="hero-hearts" />
       </section>
 
       <div className="workspace">
@@ -378,7 +387,7 @@ export default function App() {
       </section>
       <div className="bottom-note"><Doodle kind="sun" /><div><span>PSST... THE DESK IS JUST THE BEGINNING.</span><p>Turns out, we might have more in common than we think.</p></div><Doodle kind="plane" /></div>
     </main>
-    <footer><span><MicrosoftMark /> A little play, by <b>Studio 91</b></span><span>Made for connection. Not for report cards. <span className="footer-spark">✳</span></span></footer>
+    <footer><span><MicrosoftMark /> A little play, by <b>Studio +91</b></span><span>Made for connection. Not for report cards. <span className="footer-spark">✳</span></span></footer>
 
     {modal && <ModalShell title={modal === 'create' ? 'Class is about to begin.' : modal === 'join' ? 'Your classmates are waiting.' : modal === 'name' ? 'First, a little introduction.' : modal === 'results' ? 'So, where did we all sit?' : 'A trip down memory lane.'}
       wide={modal === 'results'} onClose={() => { if (!busy) { setModal(null); setError(''); } }}>
