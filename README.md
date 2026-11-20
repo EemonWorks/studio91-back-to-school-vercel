@@ -13,9 +13,46 @@ A shared classroom icebreaker with 20 two-person benches, 40 selectable spots, c
 
 Reference attachments remain unchanged; derived web assets are in `public/branding` and `public/visuals`. Gameplay, room IDs, cats, pencil counts, and live cursors are unaffected by the style change.
 
-## Deploy on Vercel: one project, one link
+## Deploy without Redis: one Node service
+
+Redis is **not required** for a single-server deployment. The same Node process serves the website, stores votes in a local JSON file, and broadcasts live cursors. Cats, shared seats, pencil piles, and charts are unchanged. No separate database needs to be provisioned.
+
+### Redis-free build and start
+
+```powershell
+npm ci --include=dev
+npm run build
+npm run start:standalone
+```
+
+`start:standalone` explicitly uses local files and ignores `REDIS_URL`, even if it was left in the hosting environment. The Redis implementation is not imported or connected in this mode. The npm Redis library can remain in the package for the optional Vercel deployment; it is not a paid service.
+
+### One-service hosting on Render
+
+1. Put this updated project's contents in your GitHub repository.
+2. In Render, select **New > Blueprint** and connect the repository. The included `render.yaml` creates **one free Node web service**, not a Redis service or database.
+3. Review the configuration before approving. The build is `npm ci --include=dev && npm run build`; the start command is `npm run start:standalone`; health checking uses `/api/health`. Node 24 is selected by the project's `engines` and `.nvmrc`.
+4. Deploy, open the generated HTTPS link, create a classroom, and share that room's invite link. All participants use the same website and server.
+
+**Free is for demos, not guaranteed meeting hosting.** Render states that free services sleep after 15 minutes without inbound traffic, may take about a minute to wake up, can restart at any time, and have an ephemeral filesystem. Room votes are lost when the service sleeps, restarts, or redeploys. Free services cannot attach persistent disks. Do not rely on this tier for guaranteed 200-person uptime or retained results.
+
+For persistent rooms, choose a paid single web service and attach a persistent disk at `/opt/render/project/src/data`. Keep `DATA_FILE` unset so the default `data/rooms.json` is stored there, or set it to a file under your chosen disk mount. Only one service instance may access the file. Keep autoscaling disabled, preserve disk backups, and validate the deployed service before the event. This pays for the web server/disk, **not a separate Redis integration**. No paid service is provisioned by this source package.
+
+If you create a Render Web Service manually instead of a Blueprint, enter the same build/start commands. Do not select **Static Site**: static hosting cannot provide rooms and cursors. Other hosts supporting one long-running Node 24 process, HTTPS, streaming HTTP responses, and a writable disk can use the same Redis-free mode.
+
+Official limits: [Render free services](https://render.com/docs/free) and [persistent disks](https://render.com/docs/disks).
+
+### Existing rooms and limits
+
+Existing cloud Redis rooms are not automatically copied into the file store. A new host starts with new rooms unless the operator deliberately migrates an approved data file. Local meeting data is never included in the ZIP.
+
+The single-server design has passed local tests with 200 clients choosing the same desk. Its actual host/network capacity must still be tested. Without shared storage it cannot run as multiple replicas or as independent serverless functions.
+
+## Optional Vercel deployment: shared Redis required
 
 The website and all API routes deploy together. Redis is connected once from the same Vercel dashboard; you do not deploy a separate backend website.
+
+Vercel's serverless API still requires shared storage. The Redis-free start command is **not** a workaround for Vercel Functions: requests may reach different instances and local files do not provide durable shared state. Keep this optional configuration if you want Vercel later, or use the one-service instructions above to avoid the integration entirely.
 
 1. **Use this updated source.** Extract the project ZIP and put its contents in your GitHub repository, or push this working tree after reviewing it. The ZIP has `package.json` and `vercel.json` at its root. A previously uploaded GitHub revision will not acquire these changes automatically.
 2. In Vercel, select **Add New > Project** and import that repository. Select the repository root, not `src` or `dist`.

@@ -8,6 +8,7 @@
     "dev": "concurrently -k -n server,classroom \"node --watch server/index.ts\" \"vite --host 0.0.0.0\"",
     "build": "tsc --noEmit && vite build && node scripts/compress.mjs",
     "start": "node server/index.ts",
+    "start:standalone": "node server/index.ts --standalone",
     "test": "node --test server/app.test.ts server/static.test.ts server/config.test.ts server/deployment.test.ts",
     "test:redis": "node --test server/redis.test.ts"
   },
