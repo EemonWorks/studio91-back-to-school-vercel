@@ -28,33 +28,15 @@ export interface Room {
   votes: Vote[];
 }
 
-export type CursorSurface = 'page' | '3d' | 'map';
-export interface LiveCursor {
-  id: string;
-  name: string;
-  color: string;
+/** Where a seat appears inside the classroom panel, in CSS pixels from its top-left corner. */
+export interface SeatPoint {
   x: number;
   y: number;
-  surface: CursorSurface;
 }
-export interface CursorBatch {
-  replace: boolean;
-  cursors: LiveCursor[];
-  removed: string[];
-  online: number;
-}
-export interface PresenceInput {
-  session: string;
-  key: string;
-  name: string;
-  x: number;
-  y: number;
-  surface: CursorSurface;
-  active: boolean;
-}
+
 export type ConnectionState = 'preview' | 'connecting' | 'live' | 'offline';
-export const CURSOR_INTERVAL_MS = 180;
-export const CURSOR_TTL_MS = 20_000;
+/** How often each browser asks for the latest seats. */
+export const POLL_INTERVAL_MS = 2000;
 
 export function pencilPose(index: number, total: number) {
   if (!Number.isInteger(total) || total < 1 || !Number.isInteger(index) || index < 0 || index >= total) {

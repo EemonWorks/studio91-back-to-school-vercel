@@ -22,5 +22,5 @@
     "moduleDetection": "force",
     "skipLibCheck": true
   },
-  "include": ["src", "server", "api", "vite.config.ts"]
+  "include": ["src", "api", "vite.config.ts"]
 }

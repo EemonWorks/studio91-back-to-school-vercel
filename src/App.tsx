@@ -1,37 +1,66 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
-  ArrowRight, Armchair, BookOpen, Cat, Check, ChevronRight, CircleHelp,
-  DoorOpen, Download, Grid2X2, Link, LoaderCircle, Minus, MousePointer2,
+  ArrowRight, Armchair, BookOpen, Cat, Check, CircleHelp,
+  Download, Grid2X2, Link, LoaderCircle, Minus, MousePointer2,
   Plus, RotateCcw, School, Share2, Sparkles, Users, X,
 } from 'lucide-react';
-import { BENCHES_PER_ROW, COLUMNS, GROUPS, ROWS, SEAT_COUNT, SEATS_PER_BENCH, groupFor, newestSnapshot, pencilPose, rowFor, seatLabel, summarize } from './shared';
-import type { ConnectionState, Room } from './shared';
-import LivePresence from './LivePresence';
+import {
+  BENCHES_PER_ROW, COLUMNS, GROUPS, POLL_INTERVAL_MS, ROWS, SEAT_COUNT, SEATS_PER_BENCH,
+  groupFor, newestSnapshot, pencilPose, rowFor, seatLabel, summarize,
+} from './shared';
+import type { ConnectionState, Room, SeatPoint } from './shared';
 import Doodle from './Doodle';
+import HostTools from './HostTools';
+import SimulatedClassmates from './SimulatedClassmates';
 
 const Classroom = lazy(() => import('./Classroom'));
 const emptyVotes: Room['votes'] = [];
-type Modal = 'create' | 'join' | 'results' | 'help' | 'name' | null;
+type Modal = 'results' | 'help' | 'name' | null;
 type Profile = { token: string; name: string };
+type SavedSeat = { epoch: string; seat: number };
+const PROFILE_KEY = 'studio91.profile';
+const SEAT_KEY = 'studio91.seat';
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
+async function request<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, body === undefined ? undefined : {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    response = await fetch(path, body === undefined ? { signal: signal ?? null } : {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: signal ?? null,
     });
   } catch {
     throw new Error('Cannot reach the classroom. Check your connection and try again.');
   }
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
-    throw new Error('The classroom API is not available at this address. Check the deployment and Redis connection, then reload.');
+    throw new Error('The classroom is not reachable right now. Please reload in a moment.');
   }
   const result = await response.json();
   if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : 'The classroom is unavailable. Try again.');
   return result as T;
+}
+
+// The seat you picked is remembered per "class" (the room's createdAt). When the
+// host erases all seats, createdAt changes and everyone's old pick is forgotten.
+function readSavedSeat(): SavedSeat | null {
+  try {
+    const raw = localStorage.getItem(SEAT_KEY);
+    if (!raw) return null;
+    const value: unknown = JSON.parse(raw);
+    if (value && typeof value === 'object' && 'epoch' in value && typeof value.epoch === 'string' &&
+      'seat' in value && typeof value.seat === 'number' && Number.isInteger(value.seat) &&
+      value.seat >= 0 && value.seat < SEAT_COUNT) return { epoch: value.epoch, seat: value.seat };
+    console.warn('The saved seat is invalid and will not be restored.');
+  } catch (issue) {
+    console.warn('The saved seat could not be restored:', issue);
+  }
+  return null;
+}
+
+function forgetSavedSeat() {
+  try { localStorage.removeItem(SEAT_KEY); }
+  catch (issue) { console.warn('The saved seat could not be removed:', issue); }
 }
 
 function ModalShell({ title, children, onClose, wide = false }: {
@@ -55,8 +84,8 @@ function MicrosoftMark() {
   return <span className="ms-mark" aria-hidden="true"><i /><i /><i /><i /></span>;
 }
 
-function SeatMap({ counts, selected, heatmap, onSelect }: {
-  counts: number[]; selected: number | null; heatmap: boolean; onSelect: (seat: number) => void;
+function SeatMap({ counts, selected, heatmap, botSeats, onSelect }: {
+  counts: number[]; selected: number | null; heatmap: boolean; botSeats: number[]; onSelect: (seat: number) => void;
 }) {
   const max = Math.max(1, ...counts);
   return <div className="seat-map">
@@ -81,11 +110,13 @@ function SeatMap({ counts, selected, heatmap, onSelect }: {
           {Array.from({ length: SEATS_PER_BENCH }, (_, side) => {
             const seat = firstSeat + side;
             const count = counts[seat] ?? 0;
-            return <button key={seat} className={`map-desk ${selected === seat ? 'selected' : ''}`}
+            const visitorHere = botSeats.includes(seat);
+            return <button key={seat} data-seat={seat}
+              className={`map-desk ${selected === seat ? 'selected' : ''} ${visitorHere ? 'bot-hover' : ''}`}
               style={heatmap && count ? { background: `color-mix(in srgb, #e7337f ${30 + count / max * 70}%, #fff3a0)` } : undefined}
               aria-label={`Seat ${seatLabel(seat)}, row ${row + 1}, ${count} ${count === 1 ? 'person' : 'people'}`}
               aria-pressed={selected === seat} onClick={() => onSelect(seat)}>
-              <span>{seatLabel(seat)}</span>{(count > 0 || selected === seat) && <Cat className={`map-cat ${selected === seat ? 'your-cat' : ''}`} size={18} />}
+              <span>{seatLabel(seat)}</span>{(count > 0 || selected === seat || visitorHere) && <Cat className={`map-cat ${selected === seat ? 'your-cat' : ''}`} size={18} />}
               {count > 0 && <b>{count}</b>}
             </button>;
           })}
@@ -117,24 +148,24 @@ export default function App() {
   const [selected, setSelected] = useState<number | null>(null);
   const [pendingSeat, setPendingSeat] = useState<number | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
+  const [botSeats, setBotSeats] = useState<number[]>([]);
   const [view, setView] = useState<'3d' | 'map'>('3d');
   const [heatmap, setHeatmap] = useState(false);
   const [reset, setReset] = useState(0);
   const [zoom, setZoom] = useState(0);
   const [modal, setModal] = useState<Modal>(null);
   const [name, setName] = useState('');
-  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [toast, setToast] = useState('');
-  const [connection, setConnection] = useState<ConnectionState>('preview');
-  const [storageAvailable, setStorageAvailable] = useState(true);
-  const joinAttempted = useRef(false);
+  const [connection, setConnection] = useState<ConnectionState>('connecting');
   const { counts, seats, total } = summarize(room?.votes ?? emptyVotes);
-  const roomCode = room?.code;
   const voteLock = useRef(false);
   const pageRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
+  const seatPoints = useRef<SeatPoint[]>([]);
+  const inviteLink = `${location.origin}${location.pathname}`;
   const receiveRoom = useCallback((next: Room) => {
     setRoom((current) => newestSnapshot(current, next));
   }, []);
@@ -146,89 +177,117 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const restoreProfile = useCallback((joinedCode: string) => {
+  // Old invite links (?room=ABC123) still work: they just land in the one classroom.
+  useEffect(() => {
+    if (!location.search) return;
+    history.replaceState(null, '', location.pathname);
+  }, []);
+
+  // Remember who this browser is (first name + private seat ticket).
+  useEffect(() => {
+    let raw: string | null;
     try {
-      const raw = localStorage.getItem('studio91.profile');
-      if (raw) {
-        const saved: unknown = JSON.parse(raw);
-        if (saved && typeof saved === 'object' && 'token' in saved && typeof saved.token === 'string' &&
-          'name' in saved && typeof saved.name === 'string') {
-          setProfile({ token: saved.token, name: saved.name });
-          setName(saved.name);
-        } else throw new Error('Stored profile is invalid.');
-      }
-      const seat = localStorage.getItem(`studio91.seat.${joinedCode}`);
-      setSelected(seat !== null && Number.isInteger(Number(seat)) && Number(seat) >= 0 && Number(seat) < SEAT_COUNT ? Number(seat) : null);
+      raw = localStorage.getItem(PROFILE_KEY);
     } catch (issue) {
-      console.warn('Browser storage is unavailable or invalid:', issue);
-      setStorageAvailable(false);
+      console.warn('Browser storage is unavailable:', issue);
       notify('Browser storage is unavailable. Keep this tab open to retain your identity.');
+      return;
     }
+    if (!raw) return;
+    try {
+      const saved: unknown = JSON.parse(raw);
+      if (saved && typeof saved === 'object' && 'token' in saved && typeof saved.token === 'string' &&
+        'name' in saved && typeof saved.name === 'string') {
+        setProfile({ token: saved.token, name: saved.name });
+        setName(saved.name);
+        return;
+      }
+      console.warn('The stored participant profile is invalid and will not be restored.');
+    } catch (issue) {
+      console.warn('The stored participant profile could not be read:', issue);
+    }
+    try { localStorage.removeItem(PROFILE_KEY); }
+    catch (issue) { console.warn('The stored participant profile could not be removed:', issue); }
   }, [notify]);
 
-  const enterRoom = useCallback((next: Room) => {
-    setRoom(next);
-    setError('');
-    setModal(null);
-    setConnection('connecting');
-    restoreProfile(next.code);
-    const url = new URL(location.href);
-    url.searchParams.set('room', next.code);
-    history.replaceState(null, '', url);
-  }, [restoreProfile]);
-
+  // Show your saved seat, unless the host has erased the class since you picked it.
+  const epoch = room?.createdAt;
   useEffect(() => {
-    if (joinAttempted.current) return;
-    joinAttempted.current = true;
-    const roomFromUrl = new URLSearchParams(location.search).get('room');
-    if (roomFromUrl) {
-      setCode(roomFromUrl.toUpperCase());
-      setBusy(true);
-      request<Room>(`/api/rooms/${encodeURIComponent(roomFromUrl.toUpperCase())}`)
-        .then(enterRoom).catch((issue) => { setError(errorMessage(issue)); setModal('join'); })
-        .finally(() => setBusy(false));
+    if (!epoch) return;
+    const saved = readSavedSeat();
+    if (saved && saved.epoch === epoch) {
+      setSelected(saved.seat);
+    } else {
+      setSelected(null);
+      if (saved) forgetSavedSeat();
     }
-  }, [enterRoom]);
+  }, [epoch]);
+
+  // Load the classroom, then check for new seats every couple of seconds.
+  useEffect(() => {
+    let stopped = false;
+    let inFlight = false;
+    let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    const poll = async () => {
+      clearTimeout(timer);
+      if (stopped || inFlight) return;
+      if (document.hidden) {
+        timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+        return;
+      }
+      inFlight = true;
+      try {
+        receiveRoom(await request<Room>('/api/room', undefined, controller.signal));
+        failures = 0;
+        setConnection('live');
+        setLoadError('');
+      } catch (issue) {
+        if (stopped) return;
+        failures += 1;
+        setConnection(failures > 1 ? 'offline' : 'connecting');
+        setLoadError(errorMessage(issue));
+      } finally {
+        inFlight = false;
+        if (!stopped) {
+          const wait = failures ? Math.min(15_000, POLL_INTERVAL_MS * 2 ** failures) : POLL_INTERVAL_MS;
+          timer = setTimeout(() => void poll(), wait);
+        }
+      }
+    };
+    const wake = () => { if (!document.hidden) void poll(); };
+    void poll();
+    document.addEventListener('visibilitychange', wake);
+    return () => {
+      stopped = true;
+      controller.abort();
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', wake);
+    };
+  }, [receiveRoom]);
 
   const openModal = (next: Modal) => { setError(''); setModal(next); };
-  const createRoom = async (event: FormEvent) => {
-    event.preventDefault();
-    setBusy(true); setError('');
-    try {
-      const next = await request<Room>('/api/rooms', {});
-      enterRoom(next);
-      if (pendingSeat !== null) setModal('name');
-      notify('Classroom is open. Invite your people!');
-    } catch (issue) { setError(errorMessage(issue)); }
-    finally { setBusy(false); }
-  };
-  const joinRoom = async (event: FormEvent) => {
-    event.preventDefault();
-    setBusy(true); setError('');
-    try {
-      enterRoom(await request<Room>(`/api/rooms/${encodeURIComponent(code.trim().toUpperCase())}`));
-      notify('Welcome to the classroom. Find your old spot.');
-    } catch (issue) { setError(errorMessage(issue)); }
-    finally { setBusy(false); }
-  };
 
   const saveVote = async (seat: number, voter: Profile) => {
     if (!room || voteLock.current) return;
     voteLock.current = true;
     setBusy(true); setError('');
     try {
-      const next = await request<Room>(`/api/rooms/${room.code}/votes`, { ...voter, seat });
-      setRoom((current) => newestSnapshot(current, next));
-      setSelected(seat); setProfile(voter); setModal(null); setPendingSeat(null);
+      const next = await request<Room>('/api/vote', { ...voter, seat });
+      let stored = true;
       try {
-        localStorage.setItem('studio91.profile', JSON.stringify(voter));
-        localStorage.setItem(`studio91.seat.${room.code}`, String(seat));
+        const saved: SavedSeat = { epoch: next.createdAt, seat };
+        localStorage.setItem(PROFILE_KEY, JSON.stringify(voter));
+        localStorage.setItem(SEAT_KEY, JSON.stringify(saved));
       } catch (issue) {
+        stored = false;
         console.warn('Could not retain participant identity:', issue);
-        setStorageAvailable(false);
         notify('Seat saved! Browser storage is unavailable; keep this tab open to avoid voting twice.');
       }
-      if (storageAvailable) notify(`Seat ${seatLabel(seat)} is yours. ${GROUPS[groupFor(seat)]!.name}, assemble!`);
+      receiveRoom(next);
+      setSelected(seat); setProfile(voter); setModal(null); setPendingSeat(null);
+      if (stored) notify(`Seat ${seatLabel(seat)} is yours. ${GROUPS[groupFor(seat)]!.name}, assemble!`);
     } catch (issue) { setError(errorMessage(issue)); }
     finally { setBusy(false); voteLock.current = false; }
   };
@@ -238,8 +297,7 @@ export default function App() {
     setHovered(null);
     document.body.style.cursor = '';
     if (!room) {
-      setPendingSeat(seat);
-      openModal('create');
+      notify('Hang on, the classroom is still opening.');
     } else if (!profile) {
       setPendingSeat(seat);
       openModal('name');
@@ -257,9 +315,8 @@ export default function App() {
     void saveVote(pendingSeat, { token, name: name.trim() });
   };
   const copyInvite = async () => {
-    if (!room) return;
     try {
-      await navigator.clipboard.writeText(location.href);
+      await navigator.clipboard.writeText(inviteLink);
       notify('Invite link copied. Pass it around!');
     } catch (issue) {
       console.warn('Clipboard permission unavailable:', issue);
@@ -274,9 +331,18 @@ export default function App() {
       `${g.name},${i === 0 ? '1-2' : i === 1 ? '3' : '4-5'},${counts[i]},${total ? ((counts[i] ?? 0) / total * 100).toFixed(1) : 0}`)].join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
-    link.href = url; link.download = `studio91-${room.code}-seating.csv`; link.click();
+    link.href = url; link.download = `studio91-seating-${new Date().toISOString().slice(0, 10)}.csv`; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+  // Host-only: wipes every registered seat (needs the ADMIN_RESET_KEY passcode).
+  const eraseAllSeats = useCallback(async (passcode: string) => {
+    const next = await request<Room>('/api/reset', { key: passcode });
+    forgetSavedSeat();
+    setSelected(null);
+    setPendingSeat(null);
+    receiveRoom(next);
+    notify('All seats erased. The classroom is fresh for your event.');
+  }, [notify, receiveRoom]);
   const unavailable = useCallback(() => {
     setView('map');
     notify('3D is unavailable on this device. The interactive seat map is ready instead.');
@@ -295,20 +361,14 @@ export default function App() {
       <div className="header-middle"><span className="tiny-star">✳</span> A LITTLE NOSTALGIA. A LOT OF US.</div>
       <nav aria-label="Classroom actions">
         <button className="text-button how-button" onClick={() => openModal('help')}><CircleHelp size={15} /> How it works</button>
-        {room ? <button className="button small invite-button" onClick={() => void copyInvite()}><Share2 size={15} /> Invite classmates</button>
-          : <button className="button small" onClick={() => openModal('join')}><DoorOpen size={15} /> Join a classroom</button>}
+        <button className="button small invite-button" onClick={() => void copyInvite()}><Share2 size={15} /> Invite classmates</button>
       </nav>
     </header>
 
     <main>
-      <section className="intro" aria-labelledby="home-title">
-        <img className="board-artwork" src={`${import.meta.env.BASE_URL}visuals/board.webp`}
-          width={1365} height={768} alt="" fetchPriority="high" />
-        <h1 className="sr-only" id="home-title">Back to school. Back to your seat.</h1>
-        <p className="sr-only">Studio +91 All Hearts. Masti ki paathshala. Thought: Every change is an opportunity to meet a new you.</p>
-      </section>
-      <section className="welcome-notes" aria-label="Classroom welcome">
+      <section className="welcome-notes" aria-labelledby="home-title">
         <div className="welcome-copy">
+          <h1 className="sr-only" id="home-title">Back to school. Back to your seat.</h1>
           <div className="eyebrow"><span className="eyebrow-line" /> STUDIO +91 HOMECOMING <span className="edition">VOL. 01</span></div>
           <h2>Where did you sit when the bell rang?</h2>
           <p>New faces. Old habits. Find your old spot, and meet your classmates.</p>
@@ -319,7 +379,7 @@ export default function App() {
       <div className="workspace">
         <section className="classroom-card" aria-label="Choose a classroom seat">
           <div className="scene-top">
-            <div className="classroom-caption"><span className="caption-dot" /><span>{room ? `ROOM ${room.code}` : 'THE MEMORY ROOM'}<small>20 benches. 40 old spots.</small></span></div>
+            <div className="classroom-caption"><span className="caption-dot" /><span>THE MEMORY ROOM<small>20 benches. 40 old spots.</small></span></div>
             <div className="view-tabs" role="tablist" aria-label="Classroom view">
               <button role="tab" aria-selected={view === '3d'} className={view === '3d' ? 'active' : ''} onClick={() => setView('3d')}><School size={14} /> 3D classroom</button>
               <button role="tab" aria-selected={view === 'map'} className={view === 'map' ? 'active' : ''} onClick={() => setView('map')}><Grid2X2 size={14} /> Seat map</button>
@@ -327,9 +387,9 @@ export default function App() {
           </div>
           <div className={`scene-area ${busy ? 'saving' : ''}`} ref={sceneRef}>
             {view === '3d' ? <Suspense fallback={<div className="scene-loader"><LoaderCircle className="spin" />Opening the classroom...</div>}>
-              <Classroom counts={seats} selected={selected} heatmap={heatmap} onSelect={chooseSeat} onHover={setHovered}
-                reset={reset} zoom={zoom} onUnavailable={unavailable} />
-            </Suspense> : <SeatMap counts={seats} selected={selected} heatmap={heatmap} onSelect={chooseSeat} />}
+              <Classroom counts={seats} selected={selected} heatmap={heatmap} botSeats={botSeats} seatPoints={seatPoints}
+                onSelect={chooseSeat} onHover={setHovered} reset={reset} zoom={zoom} onUnavailable={unavailable} />
+            </Suspense> : <SeatMap counts={seats} selected={selected} heatmap={heatmap} botSeats={botSeats} onSelect={chooseSeat} />}
             {hovered !== null && view === '3d' && <div className="seat-tooltip">
               <Armchair size={16} /><b>Seat {seatLabel(hovered)}</b><span>Row {rowFor(hovered) + 1}</span>
               <small>{hoveredPeople.length ? `${hoveredPeople.length} ${hoveredPeople.length === 1 ? 'classmate' : 'classmates'} chose this spot` : 'One shared bench. Your own old spot.'}</small>
@@ -357,13 +417,13 @@ export default function App() {
             <div className="ticket-icon"><Armchair size={28} strokeWidth={1.5} /><span>✦</span></div>
             <h2>{selected === null ? 'Somewhere in here,\nyou were you.' : `Hey ${profile?.name ?? 'classmate'},\nwelcome back.`}</h2>
             <p>{selected === null ? 'First to raise your hand? Or the unofficial mayor of the back row?' : `Seat ${seatLabel(selected)}. Row ${rowFor(selected) + 1}. A little older, still the same you.`}</p>
-            {!room ? <>
-              <button className="button full" onClick={() => openModal('create')}>Open a classroom <ArrowRight size={16} /></button>
-              <button className="join-link" onClick={() => openModal('join')}>Have a room code? <span>Join in <ChevronRight size={13} /></span></button>
-            </> : selected === null ? <div className="pick-prompt"><span className="pulse-ring" />Pick your side of a bench to join <ArrowRight size={15} /></div>
+            {!room ? (loadError
+              ? <p className="inline-error" role="alert">{loadError}</p>
+              : <div className="pick-prompt">Opening the classroom... <LoaderCircle className="spin" size={15} /></div>)
+              : selected === null ? <div className="pick-prompt"><span className="pulse-ring" />Pick your side of a bench to join <ArrowRight size={15} /></div>
               : <div className="chosen-seat"><span><Check size={16} /> {GROUPS[groupFor(selected)]!.name}</span><small>Change your mind? Click another desk.</small></div>}
             <div className="ticket-tear"><span /><i /><span /></div>
-            <div className="seat-footnote"><Users size={13} />{room ? 'Two per bench. Shared seat choices welcome.' : 'Make a room. Share the link. Find your people.'}</div>
+            <div className="seat-footnote"><Users size={13} />Two per bench. Shared seat choices welcome.</div>
             <Doodle kind="hearts" className="ticket-hearts" />
           </section>
 
@@ -373,7 +433,7 @@ export default function App() {
             <ResultsChart votes={room?.votes ?? emptyVotes} />
             <button className="results-link" disabled={!total} onClick={() => openModal('results')}>Discover our seating story <ArrowRight size={16} /></button>
           </section>
-          {connection === 'offline' && <p role="status" className="connection-warning">Connection lost. Reconnecting automatically; results may be out of date.</p>}
+          {connection === 'offline' && room && <p role="status" className="connection-warning">Connection lost. Reconnecting automatically; results may be out of date.</p>}
           {error && !modal && <p className="inline-error" role="alert">{error}</p>}
         </aside>
       </div>
@@ -387,33 +447,23 @@ export default function App() {
       </section>
       <div className="bottom-note"><Doodle kind="sun" /><div><span>PSST... THE DESK IS JUST THE BEGINNING.</span><p>Turns out, we might have more in common than we think.</p></div><Doodle kind="plane" /></div>
     </main>
-    <footer><span><MicrosoftMark /> A little play, by <b>Studio +91</b></span><span>Made for connection. Not for report cards. <span className="footer-spark">✳</span></span></footer>
+    <footer>
+      <span><MicrosoftMark /> A little play, by <b>Studio +91</b></span>
+      <span>Made for connection. Not for report cards. <span className="footer-spark">✳</span></span>
+      <HostTools onErase={eraseAllSeats} />
+    </footer>
 
-    {modal && <ModalShell title={modal === 'create' ? 'Class is about to begin.' : modal === 'join' ? 'Your classmates are waiting.' : modal === 'name' ? 'First, a little introduction.' : modal === 'results' ? 'So, where did we all sit?' : 'A trip down memory lane.'}
+    {modal && <ModalShell title={modal === 'name' ? 'First, a little introduction.' : modal === 'results' ? 'So, where did we all sit?' : 'A trip down memory lane.'}
       wide={modal === 'results'} onClose={() => { if (!busy) { setModal(null); setError(''); } }}>
-      {modal === 'create' && <form onSubmit={createRoom}>
-        <div className="modal-illustration"><School size={45} strokeWidth={1.2} /><Sparkles size={21} /></div>
-        <p>20 two-person benches, 40 old spots. Open a classroom, then share the invite link with everyone in your meeting.</p>
-        <ul className="simple-list"><li><Check size={15} />No sign-ups, just first names.</li><li><Check size={15} />Everyone chooses where they used to sit.</li><li><Check size={15} />See your shared patterns, live.</li></ul>
-        <p className="privacy-note">Anyone with the room link can see first names and seat choices. Use a nickname if you prefer.</p>
-        <button className="button full" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : <Plus size={17} />} Open the classroom</button>
-      </form>}
-      {modal === 'join' && <form onSubmit={joinRoom}>
-        <p>Pop in the six-character code your host shared. Your old seat is waiting.</p>
-        <label htmlFor="room-code">Classroom code</label>
-        <input id="room-code" className="code-input" autoFocus autoComplete="off" maxLength={6} minLength={6} required placeholder="ABC234" value={code}
-          onChange={(event) => setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
-        <button className="button full" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : <DoorOpen size={17} />} Join the class</button>
-      </form>}
       {modal === 'name' && <form onSubmit={submitName}>
         <div className="name-seat-preview"><Armchair size={28} /><span>Seat {pendingSeat === null ? '' : seatLabel(pendingSeat)}<small>Your new-old spot.</small></span></div>
         <label htmlFor="guest-name">What should we call you?</label>
         <input id="guest-name" autoFocus autoComplete="given-name" maxLength={32} required placeholder="First name or nickname" value={name} onChange={(event) => setName(event.target.value)} />
-        <p className="privacy-note">Your name and seat choice are visible to people in this room. No email, no account, no report card.</p>
+        <p className="privacy-note">Your name and seat choice are visible to everyone with the link. No email, no account, no report card.</p>
         <button className="button full" disabled={busy || !name.trim()}>{busy ? <LoaderCircle className="spin" size={17} /> : <Armchair size={17} />} That's my seat</button>
       </form>}
       {modal === 'results' && <>
-        <div className="results-headline"><span className="results-total">{total}</span><div><b>different people.<br />A few familiar patterns.</b><p>Classroom {room?.code} · Updating live</p></div><Sparkles size={36} strokeWidth={1.2} /></div>
+        <div className="results-headline"><span className="results-total">{total}</span><div><b>different people.<br />A few familiar patterns.</b><p>Updating live</p></div><Sparkles size={36} strokeWidth={1.2} /></div>
         <div className="winning-note">{leaders.length === 1 ? <><b>{leaders[0]?.name}</b> are running this classroom.</> : <>It's a tie between <b>{leaders.map((g) => g.name).join(' & ')}</b>.</>}</div>
         <ResultsChart votes={room?.votes ?? emptyVotes} large />
         <div className="result-heatmap"><h3>A little map of us</h3><div className="mini-grid">
@@ -432,14 +482,14 @@ export default function App() {
       </>}
       {modal === 'help' && <>
         <p>A tiny classroom for a big reunion. Here's how to play.</p>
-        <ol className="how-steps"><li><span>1</span><div><b>Gather your class.</b><p>Share the classroom link or code. Live cursors let you see classmates exploring; cursor positions disappear when they leave.</p></div></li><li><span>2</span><div><b>Find your old spot.</b><p>Choose your side of a bench and enter a first name. A golden cat marks your spot. Everyone adds one big pencil to their desk; shared choices build a pencil mountain. Moving seats moves your pencil, too.</p></div></li><li><span>3</span><div><b>See what connects you.</b><p>Reveal the seating story: front rows 1-2, middle row 3, back rows 4-5. Backbench scribbles included. Everyone is welcome, even if all 200 choose the same desk!</p></div></li></ol>
-        {room && <div className="share-box"><label htmlFor="invite-link"><Link size={14} /> Your classroom invite</label><input id="invite-link" readOnly value={location.href} onFocus={(event) => event.target.select()} /><span>Or share room code <b>{room.code}</b></span></div>}
-        <p className="privacy-note">Names and choices are shared within the room and saved on the server. One vote per browser profile, not verified per person. Keep your room link within your group.</p>
+        <ol className="how-steps"><li><span>1</span><div><b>Open the link.</b><p>Everyone lands in the same classroom. No codes, no sign-ups.</p></div></li><li><span>2</span><div><b>Find your old spot.</b><p>Choose your side of a bench and enter a first name. A golden cat marks your spot. Everyone adds one big pencil to their desk; shared choices build a pencil mountain. Moving seats moves your pencil, too.</p></div></li><li><span>3</span><div><b>See what connects you.</b><p>Reveal the seating story: front rows 1-2, middle row 3, back rows 4-5. Backbench scribbles included. Everyone is welcome, even if all 200 choose the same desk!</p></div></li></ol>
+        <p className="privacy-note">Psst... Gabbar, Piku and friends are only visiting. Only real classmates are counted.</p>
+        <div className="share-box"><label htmlFor="invite-link"><Link size={14} /> Your classroom invite</label><input id="invite-link" readOnly value={inviteLink} onFocus={(event) => event.target.select()} /></div>
+        <p className="privacy-note">Names and choices are visible to everyone with the link and saved on the server. One seat per browser, not verified per person. Keep the link within your group.</p>
       </>}
       {error && <p role="alert" className="inline-error">{error}</p>}
     </ModalShell>}
-    {roomCode && <LivePresence roomCode={roomCode} name={profile?.name ?? ''} view={view}
-      pageRef={pageRef} sceneRef={sceneRef} onRoom={receiveRoom} onConnection={setConnection} onError={setError} />}
+    <SimulatedClassmates view={view} pageRef={pageRef} sceneRef={sceneRef} seatPoints={seatPoints} onTrySeats={setBotSeats} />
     {toast && <div className="toast" role="status"><Check size={17} />{toast}<button onClick={() => setToast('')} aria-label="Dismiss notification"><X size={15} /></button></div>}
     <span className="sr-only" aria-live="polite">{busy ? 'Saving, please wait.' : ''}</span>
   </div>;

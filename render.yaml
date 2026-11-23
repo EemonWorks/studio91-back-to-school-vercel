@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: seat-picker
-    runtime: node
-    plan: free
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm run start:standalone
-    healthCheckPath: /api/health

@@ -1,16 +1,13 @@
 {
   "name": "studio91-back-to-school",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "engines": { "node": "24.x" },
   "scripts": {
-    "dev": "concurrently -k -n server,classroom \"node --watch server/index.ts\" \"vite --host 0.0.0.0\"",
-    "build": "tsc --noEmit && vite build && node scripts/compress.mjs",
-    "start": "node server/index.ts",
-    "start:standalone": "node server/index.ts --standalone",
-    "test": "node --test server/app.test.ts server/static.test.ts server/config.test.ts server/deployment.test.ts",
-    "test:redis": "node --test server/redis.test.ts"
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "test": "tsc --noEmit && node --test tests/single-room.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/outfit": "^5.2.0",
@@ -20,7 +17,6 @@
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "redis": "^5.0.0",
     "three": "^0.181.0"
   },
   "devDependencies": {
@@ -29,7 +25,6 @@
     "@types/react-dom": "^19.2.0",
     "@types/three": "^0.181.0",
     "@vitejs/plugin-react": "^5.1.0",
-    "concurrently": "^9.2.1",
     "typescript": "^5.9.3",
     "vite": "^7.2.2"
   }

@@ -1,17 +1,20 @@
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { Component, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { BENCH_COUNT, BENCH_DEPTH, BENCH_REAR_EXTENT, BENCH_WIDTH, ROWS, SEATS_PER_BENCH, benchPosition, groupFor, rowDepth } from './shared';
+import { BENCH_COUNT, BENCH_DEPTH, BENCH_REAR_EXTENT, BENCH_WIDTH, ROWS, SEAT_COUNT, SEATS_PER_BENCH, benchPosition, groupFor, rowDepth } from './shared';
+import type { SeatPoint } from './shared';
 import { CatMarker, PencilMound, graffitiDrawing } from './DeskDetails';
 
 interface Props {
   counts: number[];
   selected: number | null;
   heatmap: boolean;
+  botSeats: number[];
+  seatPoints: RefObject<SeatPoint[]>;
   onSelect: (seat: number) => void;
   onHover: (seat: number | null) => void;
   reset: number;
@@ -201,8 +204,8 @@ function SolarSystem() {
   </group>;
 }
 
-function SeatZone({ seat, count, selected, heatmap, maximum, onSelect, onHover }: {
-  seat: number; count: number; selected: boolean; heatmap: boolean; maximum: number;
+function SeatZone({ seat, count, selected, heatmap, botTrying, maximum, onSelect, onHover }: {
+  seat: number; count: number; selected: boolean; heatmap: boolean; botTrying: boolean; maximum: number;
   onSelect: Props['onSelect']; onHover: Props['onHover'];
 }) {
   const [hovered, setHovered] = useState(false);
@@ -216,7 +219,7 @@ function SeatZone({ seat, count, selected, heatmap, maximum, onSelect, onHover }
     document.body.style.cursor = 'pointer';
   };
   return <group position={[(seat % SEATS_PER_BENCH === 0 ? -1 : 1) * BENCH_WIDTH / 4, 0, 0]}>
-    {(selected || hovered || (heatmap && count > 0)) && <mesh position={[0, 1.155, 0]} receiveShadow>
+    {(selected || hovered || botTrying || (heatmap && count > 0)) && <mesh position={[0, 1.155, 0]} receiveShadow>
       <boxGeometry args={[1.13, 0.018, 0.84]} />
       <meshStandardMaterial color={color} transparent opacity={selected || heatmap ? 0.92 : 0.4} />
     </mesh>}
@@ -224,7 +227,7 @@ function SeatZone({ seat, count, selected, heatmap, maximum, onSelect, onHover }
       <Box position={[-0.13, 1.185, -0.06]} size={[0.38, 0.035, 0.44]} color="#fff9ee" rotation={[0, -0.13, 0]} />
       <Box position={[-0.31, 1.207, -0.04]} size={[0.035, 0.008, 0.4]} color="#575bc3" rotation={[0, -0.13, 0]} />
     </>}
-    {(count > 0 || selected) && <CatMarker yours={selected} side={seat % 2 === 0 ? -1 : 1} />}
+    {(count > 0 || selected || botTrying) && <CatMarker yours={selected} side={seat % 2 === 0 ? -1 : 1} />}
     {selected && <Box position={[0, 0.628, 0.82]} size={[1.07, 0.018, 0.4]} color="#bce64b" />}
     <mesh position={[0, 0.95, 0.28]}
       onClick={(event) => { event.stopPropagation(); onSelect(seat); }}
@@ -235,8 +238,8 @@ function SeatZone({ seat, count, selected, heatmap, maximum, onSelect, onHover }
   </group>;
 }
 
-function BenchDesk({ bench, counts, selected, heatmap, maximum, topGeometry, onSelect, onHover }: {
-  bench: number; counts: number[]; selected: number | null; heatmap: boolean; maximum: number;
+function BenchDesk({ bench, counts, selected, heatmap, botSeats, maximum, topGeometry, onSelect, onHover }: {
+  bench: number; counts: number[]; selected: number | null; heatmap: boolean; botSeats: number[]; maximum: number;
   topGeometry: THREE.BufferGeometry; onSelect: Props['onSelect']; onHover: Props['onHover'];
 }) {
   const firstSeat = bench * SEATS_PER_BENCH;
@@ -262,9 +265,27 @@ function BenchDesk({ bench, counts, selected, heatmap, maximum, topGeometry, onS
     {[-0.99, 0.99].map((x) => <Box key={x} position={[x, 0.83, 1.03]} size={[0.05, 0.5, 0.05]} color="#35416e" />)}
     {Array.from({ length: SEATS_PER_BENCH }, (_, side) => <SeatZone key={side}
       seat={firstSeat + side} count={counts[firstSeat + side] ?? 0}
-      selected={selected === firstSeat + side} heatmap={heatmap} maximum={maximum}
+      selected={selected === firstSeat + side} heatmap={heatmap}
+      botTrying={botSeats.includes(firstSeat + side)} maximum={maximum}
       onSelect={onSelect} onHover={onHover} />)}
   </group>;
+}
+
+// Works out where each desk appears on screen, so the famous visitors can
+// point at the right desk however the classroom is rotated or zoomed.
+function SeatProjector({ seatPoints }: { seatPoints: Props['seatPoints'] }) {
+  const { camera, size } = useThree();
+  const point = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    for (let seat = 0; seat < SEAT_COUNT; seat++) {
+      const [x, y, z] = benchPosition(Math.floor(seat / SEATS_PER_BENCH));
+      const side = seat % SEATS_PER_BENCH === 0 ? -1 : 1;
+      // Desk-top centre of this seat (the scene is lowered by 0.5).
+      point.set(x + side * BENCH_WIDTH / 4, y + 0.7, z + 0.15).project(camera);
+      seatPoints.current[seat] = { x: (point.x + 1) / 2 * size.width, y: (1 - point.y) / 2 * size.height };
+    }
+  });
+  return null;
 }
 
 function CameraControls({ reset, zoom, onUnavailable }: { reset: number; zoom: number; onUnavailable: () => void }) {
@@ -314,11 +335,14 @@ function CameraControls({ reset, zoom, onUnavailable }: { reset: number; zoom: n
 }
 
 function Scene(props: Props) {
+  const { invalidate } = useThree();
+  useEffect(() => { invalidate(); }, [props.botSeats, invalidate]);
   const top = useMemo(() => new RoundedBoxGeometry(BENCH_WIDTH, 0.13, BENCH_DEPTH, 3, 0.055), []);
   useEffect(() => () => top.dispose(), [top]);
   const maximum = Math.max(1, ...props.counts);
   return <>
     <CameraControls reset={props.reset} zoom={props.zoom} onUnavailable={props.onUnavailable} />
+    <SeatProjector seatPoints={props.seatPoints} />
     <ambientLight intensity={1.2} />
     <hemisphereLight args={['#fff6fb', '#9ba6cf', 1.3]} />
     <directionalLight position={[-8, 16, 4]} intensity={2.5} castShadow
@@ -364,7 +388,7 @@ function Scene(props: Props) {
       <SolarSystem />
       {Array.from({ length: BENCH_COUNT }, (_, bench) => <BenchDesk key={bench} bench={bench}
         counts={props.counts} selected={props.selected}
-        heatmap={props.heatmap} maximum={maximum} topGeometry={top}
+        heatmap={props.heatmap} botSeats={props.botSeats} maximum={maximum} topGeometry={top}
         onSelect={props.onSelect} onHover={props.onHover} />)}
     </group>
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.07, 0]} receiveShadow>
